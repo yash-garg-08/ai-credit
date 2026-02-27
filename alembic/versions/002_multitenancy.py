@@ -245,14 +245,16 @@ def upgrade() -> None:
     # --- update usage_events: add agent_id, latency_ms, status, error_message ---
     op.add_column("usage_events", sa.Column("agent_id", sa.UUID(), nullable=True))
     op.add_column("usage_events", sa.Column("latency_ms", sa.Integer(), nullable=True))
+    usage_status_enum = sa.Enum(
+        "SUCCESS", "ERROR", "POLICY_BLOCKED", "BUDGET_EXCEEDED", name="usagestatus"
+    )
+    usage_status_enum.create(op.get_bind(), checkfirst=True)
+
     op.add_column(
         "usage_events",
         sa.Column(
             "status",
-            sa.Enum(
-                "SUCCESS", "ERROR", "POLICY_BLOCKED", "BUDGET_EXCEEDED",
-                name="usagestatus"
-            ),
+            usage_status_enum,
             nullable=False,
             server_default="SUCCESS",
         ),
