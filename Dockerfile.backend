@@ -1,0 +1,23 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip first
+RUN pip install --upgrade pip
+
+# Copy everything, then install so the editable install resolves correctly
+COPY . .
+
+RUN pip install -e ".[dev]"
+
+# Make entrypoints executable
+RUN chmod +x scripts/entrypoint.sh scripts/worker_entrypoint.sh
+
+EXPOSE 8000
+
+CMD ["sh", "scripts/entrypoint.sh"]
