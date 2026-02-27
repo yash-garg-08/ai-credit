@@ -36,9 +36,9 @@ Users (human) authenticate via JWT. Agents authenticate via `cpk_` API keys.
 1. **No stored balance.** `balance = SELECT SUM(amount) FROM ledger WHERE group_id = $1`. Never a cached column.
 2. **No double deduction.** Temporal workflow ID = `request_id` UUID. Temporal deduplicates. DB: unique `idempotency_key` column.
 3. **No race condition.** `pg_advisory_xact_lock(int(group_id.int % 2**31))` held for duration of balance-check + deduction insert inside one transaction.
-4. **Credits are integers.** `BIGINT`. Cost rounded UP (`math.ceil`) to avoid under-charging.
+4. **Credits are integers.** `BIGINT`. Cost rounded UP with Decimal ceiling to avoid under-charging.
 5. **API keys never stored.** Only `SHA-256(key)` persisted. `key_suffix` (last 8 chars) for display only.
-6. **BYOK keys encrypted.** Fernet AES-256. `CREDENTIAL_ENCRYPTION_KEY` env var. Auto-generated in dev (keys lost on restart).
+6. **BYOK keys encrypted.** Fernet AES-256. `CREDENTIAL_ENCRYPTION_KEY` env var. Auto-generated once per process in dev (keys lost on restart).
 7. **Ledger append-only.** No UPDATE or DELETE on `ledger` rows ever.
 8. **Audit append-only.** No UPDATE or DELETE on `audit_logs` rows ever.
 
@@ -50,6 +50,7 @@ Users (human) authenticate via JWT. Agents authenticate via `cpk_` API keys.
 app/
   config.py              Settings(BaseSettings): database_url, redis_url, temporal_host,
                          temporal_task_queue, secret_key, algorithm, openai_api_key,
+                         anthropic_api_key,
                          openai_base_url, credential_encryption_key, credits_per_usd,
                          db_pool_size, db_max_overflow
 
@@ -122,7 +123,7 @@ app/
                          Unique index: (provider, model)
     service.py           get_pricing_rule(db, provider, model) → PricingRule
                          calculate_cost(rule, input_tokens, output_tokens) → Decimal
-                         cost_to_credits(cost_usd) → int  [math.ceil, rounds up]
+                         cost_to_credits(cost_usd, credits_per_usd?) → int  [Decimal ceiling, rounds up]
                          compute_usage_cost(db, provider, model, input, output) → CostCalculation
     router.py            GET /pricing
 
@@ -134,6 +135,7 @@ app/
                          Splits system message from messages list. Converts to Anthropic format.
     mock.py              MockProvider: deterministic, no external calls. token_count = input_chars//4
     registry.py          get_provider(name) → singleton BaseProvider  [platform keys]
+                         anthropic singleton requires ANTHROPIC_API_KEY when not using BYOK
                          make_provider(name, api_key) → ephemeral BaseProvider  [BYOK]
                          close_all() → cleanup
 
@@ -164,12 +166,14 @@ app/
     models.py            Workspace: id, org_id(FK orgs), name, slug, description, is_active
     service.py           create_workspace, list_workspaces, get_workspace
     router.py            POST /orgs/{org_id}/workspaces, GET /orgs/{org_id}/workspaces
+                         owner-scope enforced (org owner only)
 
   agent_groups/
     models.py            AgentGroup: id, workspace_id(FK workspaces), name, description, is_active
     service.py           create_agent_group, list_agent_groups, get_agent_group
     router.py            POST /workspaces/{workspace_id}/agent-groups
                          GET /workspaces/{workspace_id}/agent-groups
+                         owner-scope enforced via workspace→org lookup
 
   agents/
     models.py            Agent: id, agent_group_id(FK agent_groups), name, description,
@@ -181,10 +185,11 @@ app/
                          _hash_key(key) → SHA-256 hex
                          create_api_key(db, agent_id, name) → (ApiKey, plaintext_key)
                          resolve_api_key(db, plaintext_key) → ApiKey | None  [hash lookup]
-                         revoke_api_key(db, api_key_id, reason)
+                         revoke_api_key(db, api_key_id, reason, agent_id?)
                          create_agent, list_agents_for_group, get_agent, disable_agent
     router.py            POST /agent-groups/{id}/agents, GET /agent-groups/{id}/agents
                          POST /agents/{id}/keys, DELETE /agents/{id}/keys/{key_id}
+                         owner-scope enforced via agent_group/agent hierarchy
 
   credentials/
     models.py            ProviderCredential: id, org_id(FK orgs), provider(String 64),
@@ -194,10 +199,10 @@ app/
                          decrypt_key(ciphertext) → plaintext
                          add_credential(db, org_id, provider, plaintext_api_key, label, mode)
                          get_active_credential(db, org_id, provider) → str | None  [decrypted]
-    router.py            POST /orgs/{org_id}/credentials
+    router.py            POST /orgs/{org_id}/credentials (owner only)
 
   policies/
-    models.py            Policy: id, org_id|workspace_id|agent_group_id|agent_id (exactly one set),
+    models.py            Policy: id, org_id|workspace_id|agent_group_id|agent_id (exactly one set, DB check constraint),
                          name, allowed_models(JSON nullable), max_input_tokens(Integer nullable),
                          max_output_tokens(Integer nullable), rpm_limit(Integer nullable), is_active
     service.py           EffectivePolicy(dataclass): merged result
@@ -208,10 +213,10 @@ app/
                            ↳ single query fetching all policies matching any of the 4 levels
                          enforce_policy(policy, model, requested_max_tokens) → effective_max_tokens
                            ↳ raises AppError(message, status_code=403) if model not in allowed_models
-    router.py            POST /policies
+    router.py            POST /policies (owner + single-target schema enforcement)
 
   budgets/
-    models.py            Budget: id, org_id|workspace_id|agent_group_id|agent_id (exactly one set),
+    models.py            Budget: id, org_id|workspace_id|agent_group_id|agent_id (exactly one set, DB check constraint),
                          period(BudgetPeriod: DAILY|MONTHLY|TOTAL), limit_credits(BigInt),
                          auto_disable(Boolean), is_active
     service.py           _period_start(period) → datetime | None  [None for TOTAL]
@@ -220,8 +225,9 @@ app/
                          check_budgets(db, org_id, workspace_id, agent_group_id, agent_id, required)
                            ↳ loads all active budgets for all 4 levels in one query
                            ↳ for each budget: compute current spend, check current+required <= limit
+                           ↳ if exceeded and auto_disable=True: disables target (org/workspace/group/agent)
                            ↳ raises AppError(message, status_code=402) on any exceeded budget
-    router.py            POST /budgets
+    router.py            POST /budgets (owner + single-target schema enforcement)
 
   audit/
     models.py            AuditLog: id, org_id(Uuid not FK), actor_user_id(FK nullable),
@@ -296,10 +302,12 @@ provider_credentials(id UUID PK, org_id FK organizations, provider VARCHAR(64),
                      label VARCHAR(255), created_at)
 policies(id UUID PK, org_id FK orgs nullable, workspace_id FK nullable, agent_group_id FK nullable,
          agent_id FK nullable, name VARCHAR(255), allowed_models JSON, max_input_tokens INT,
-         max_output_tokens INT, rpm_limit INT, is_active BOOL, created_at)
+         max_output_tokens INT, rpm_limit INT, is_active BOOL, created_at,
+         CHECK(exactly one of org_id/workspace_id/agent_group_id/agent_id is set))
 budgets(id UUID PK, org_id FK nullable, workspace_id FK nullable, agent_group_id FK nullable,
         agent_id FK nullable, period ENUM('DAILY','MONTHLY','TOTAL'), limit_credits BIGINT,
-        auto_disable BOOL, is_active BOOL, created_at)
+        auto_disable BOOL, is_active BOOL, created_at,
+        CHECK(exactly one of org_id/workspace_id/agent_group_id/agent_id is set))
 audit_logs(id UUID PK, org_id UUID, actor_user_id FK users nullable, actor_agent_id FK agents nullable,
            event_type VARCHAR(128), resource_type VARCHAR(64), resource_id VARCHAR(64),
            description TEXT, metadata JSON, created_at)
@@ -434,7 +442,8 @@ async with db.begin():
 - **test_ledger.py:** 6 tests. Balance computation, credit purchase, deduction, multi-transaction sum, idempotency, per-group isolation.
 - **test_credit_deduction.py:** 8 tests. Token cost math, credits rounding (always ceiling), pipeline integration.
 - **test_workflow.py:** 4 tests. Idempotent deduction, separate keys, refund, adjustment.
-- No PostgreSQL or Temporal needed. All 18 tests pass in ~2s.
+- **test_governance.py:** 5 tests. Policy/budget target validation, org ownership authz, budget auto-disable.
+- No PostgreSQL or Temporal needed. All 23 tests pass in ~3s.
 
 **Run:** `pipenv run test` or `make test`.
 
@@ -471,6 +480,7 @@ REDIS_URL=redis://redis:6379/0
 TEMPORAL_HOST=temporal:7233          # inside Docker; localhost:7233 local dev
 SECRET_KEY=<random 32+ bytes>
 OPENAI_API_KEY=sk-...                # optional platform fallback key
+ANTHROPIC_API_KEY=sk-ant-...         # optional platform fallback key
 CREDENTIAL_ENCRYPTION_KEY=<Fernet>  # generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 CREDITS_PER_USD=100
 ```
@@ -483,7 +493,7 @@ CREDITS_PER_USD=100
 2. **passlib banned:** Use `bcrypt` directly (`import bcrypt`). passlib is broken on Python 3.13.
 3. **No JSONB/PostgreSQL UUID in models:** Use `JSON` and `Uuid` from `sqlalchemy`. JSONB only in migrations (Alembic can target Postgres).
 4. **conftest must import all models:** SQLAlchemy's `metadata.create_all` needs all table definitions visible to resolve FK dependencies.
-5. **Fernet key stability:** If `CREDENTIAL_ENCRYPTION_KEY` is not set, a new key is generated per process startup. Stored credentials become permanently unreadable. Always set this in production.
+5. **Fernet key stability:** If `CREDENTIAL_ENCRYPTION_KEY` is not set, one temporary key is generated per process startup. Stored credentials become unreadable after restart. Always set this in production.
 6. **Advisory lock integer range:** `pg_advisory_xact_lock` takes a 64-bit signed integer. Use `int(group_id.int % (2**31))` to safely map UUID → lock key.
 7. **Temporal SDK imports in workflow:** Use `workflow.unsafe.imports_passed_through()` context for non-deterministic imports (config, activities).
 8. **SQLAlchemy version constraint:** Use `>=2.0.0` (not `>=2.0.36`) in pyproject.toml for Docker compatibility.
@@ -500,9 +510,12 @@ CREDITS_PER_USD=100
 /groups        GroupsPage.tsx         Create group, purchase credits, invite member
 /agents        AgentsPage.tsx         Full Org→Workspace→AgentGroup→Agent hierarchy
                                       API key issuance with reveal-once display
+                                      Credential (BYOK/managed) creation UI
+                                      Policy creation UI (single target + limits)
+                                      Budget creation UI (single target + auto_disable)
                                       Inline gateway test panel (fires real gateway calls)
 ```
 
-**api.ts:** Typed fetch wrapper. `BASE = "/api"`. JWT token from `localStorage("token")`. All API namespaces: `authApi`, `groupsApi`, `creditsApi`, `usageApi`, `pricingApi`, `orgsApi`, `workspacesApi`, `agentGroupsApi`, `agentsApi`, `apiKeysApi`, `gatewayApi`.
+**api.ts:** Typed fetch wrapper. `BASE = "/api"`. JWT token from `localStorage("token")`. All API namespaces: `authApi`, `groupsApi`, `creditsApi`, `usageApi`, `pricingApi`, `orgsApi`, `workspacesApi`, `agentGroupsApi`, `agentsApi`, `apiKeysApi`, `credentialsApi`, `policiesApi`, `budgetsApi`, `gatewayApi`.
 
 **nginx.conf:** `location /api/ { proxy_pass http://backend:8000/; }` — trailing slash strips the `/api` prefix before forwarding.

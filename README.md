@@ -13,11 +13,12 @@ A production-grade SaaS backend for AI agent governance, built with a modular mo
 | **Proxy Gateway** | OpenAI-compatible `POST /gateway/v1/chat/completions` — agents call this instead of providers directly |
 | **API Key Management** | `cpk_` prefixed keys, SHA-256 hash storage (never plaintext), per-agent scoped, revocable |
 | **BYOK Credentials** | Org-owned provider API keys encrypted at rest (Fernet/AES-256) |
+| **Tenant Authorization** | Governance routes enforce org ownership on every create/list/mutate operation |
 | **Policy Engine** | Model allowlists, per-request token limits, RPM caps — cascades from Agent → Group → Workspace → Org (most restrictive wins) |
-| **Budget Enforcement** | Daily/Monthly/Total credit caps at every hierarchy level — auto-disables agents on exhaustion |
+| **Budget Enforcement** | Daily/Monthly/Total credit caps at every hierarchy level — optional auto-disable of exceeded target |
 | **Immutable Ledger** | Balance = `SUM(transactions)` — never a stored balance column |
 | **Temporal Workflows** | `ProcessUsageWorkflow` — idempotent credit deduction, retry-safe |
-| **Multi-Provider** | OpenAI, Anthropic Claude, Mock — pluggable provider abstraction |
+| **Multi-Provider** | OpenAI, Anthropic Claude, Mock — managed keys and BYOK supported |
 | **Observability** | Latency tracking, error status, per-agent/hierarchy analytics |
 | **Audit Logs** | Immutable audit trail for key creation, gateway requests, policy violations |
 | **Credit Purchases** | Add credits to an org with idempotency keys |
@@ -114,6 +115,7 @@ Agent → POST /gateway/v1/chat/completions
 - **No double deduction** — Temporal workflow ID = request UUID; idempotency_key unique constraint
 - **Idempotent ledger entries** — unique `idempotency_key` column prevents replay inserts
 - **Credits as integers** — stored as `BIGINT` (no floating-point drift)
+- **Single-target governance rules** — policy/budget target must be exactly one of org/workspace/agent_group/agent (schema + DB constraints)
 - **Immutable history** — ledger rows are never updated or deleted
 - **API keys never stored** — only SHA-256 hash is persisted
 - **Provider credentials encrypted** — Fernet AES-256 at rest
@@ -161,7 +163,7 @@ make up
 #   Temporal  →  http://localhost:8081
 ```
 
-That's it. `make up` builds images, runs migrations (001 + 002), seeds pricing data, and starts all 7 containers.
+That's it. `make up` builds images, runs migrations (001 + 002 + 003), seeds pricing data, and starts all 7 containers.
 
 ---
 
@@ -198,7 +200,7 @@ make help         Show this reference
 # Backend
 cp .env.example .env          # fill in DATABASE_URL, SECRET_KEY, CREDENTIAL_ENCRYPTION_KEY
 pipenv install --dev
-pipenv run migrate             # alembic upgrade head (runs both 001 and 002)
+pipenv run migrate             # alembic upgrade head (runs 001, 002, 003)
 pipenv run seed                # seed pricing
 pipenv run dev                 # uvicorn on :8000
 
@@ -392,7 +394,8 @@ ai-credit-platform/
 ├── alembic/
 │   └── versions/
 │       ├── 001_initial_schema.py
-│       └── 002_multitenancy.py  ← new hierarchy tables
+│       ├── 002_multitenancy.py
+│       └── 003_single_target_constraints.py
 ├── app/
 │   ├── main.py                 ← FastAPI app factory
 │   ├── config.py               ← pydantic-settings (incl. CREDENTIAL_ENCRYPTION_KEY)
@@ -445,7 +448,8 @@ ai-credit-platform/
 | `SECRET_KEY` | *(change this)* | JWT signing key |
 | `CREDITS_PER_USD` | `100` | Conversion rate (100 credits = $1) |
 | `OPENAI_API_KEY` | *(optional)* | Platform-level OpenAI key (fallback when no BYOK) |
-| `CREDENTIAL_ENCRYPTION_KEY` | *(auto-generated in dev)* | Fernet key for BYOK credential encryption at rest |
+| `ANTHROPIC_API_KEY` | *(optional)* | Platform-level Anthropic key (fallback when no BYOK) |
+| `CREDENTIAL_ENCRYPTION_KEY` | *(optional in dev)* | Fernet key for BYOK credential encryption at rest |
 
 Generate a Fernet key:
 ```bash
@@ -464,4 +468,4 @@ make test
 pipenv run test
 ```
 
-18 tests covering ledger correctness, cost engine pipeline, and workflow idempotency. Tests run against an in-memory SQLite database — no running Postgres required.
+23 tests covering ledger correctness, governance validation/authorization, budget auto-disable, cost engine pipeline, and workflow idempotency. Tests run against an in-memory SQLite database — no running Postgres required.

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.budgets.models import Budget, BudgetPeriod
 from app.core.exceptions import AppError
+from app.db.session import async_session_factory
 from app.usage.models import UsageEvent, UsageStatus
 
 
@@ -72,6 +73,49 @@ async def _sum_usage_for_period(
     return int(result.scalar() or 0)
 
 
+async def _auto_disable_target(
+    *,
+    budget: Budget,
+    fallback_agent_id: uuid.UUID,
+) -> None:
+    """Persist budget-based disable in its own transaction."""
+    from app.agent_groups.models import AgentGroup
+    from app.agents.models import Agent, AgentStatus
+    from app.orgs.models import Organization
+    from app.workspaces.models import Workspace
+
+    async with async_session_factory() as write_db:
+        async with write_db.begin():
+            if budget.agent_id is not None:
+                agent = await write_db.get(Agent, budget.agent_id)
+                if agent is not None:
+                    agent.status = AgentStatus.BUDGET_EXHAUSTED
+                return
+
+            if budget.agent_group_id is not None:
+                agent_group = await write_db.get(AgentGroup, budget.agent_group_id)
+                if agent_group is not None:
+                    agent_group.is_active = False
+                return
+
+            if budget.workspace_id is not None:
+                workspace = await write_db.get(Workspace, budget.workspace_id)
+                if workspace is not None:
+                    workspace.is_active = False
+                return
+
+            if budget.org_id is not None:
+                org = await write_db.get(Organization, budget.org_id)
+                if org is not None:
+                    org.is_active = False
+                return
+
+            # Defensive fallback; target should always be set due schema/DB constraints.
+            agent = await write_db.get(Agent, fallback_agent_id)
+            if agent is not None:
+                agent.status = AgentStatus.BUDGET_EXHAUSTED
+
+
 async def check_budgets(
     db: AsyncSession,
     org_id: uuid.UUID,
@@ -114,9 +158,16 @@ async def check_budgets(
                 else "agent_group" if budget.agent_group_id
                 else "agent"
             )
+            detail = ""
+            if budget.auto_disable:
+                await _auto_disable_target(
+                    budget=budget,
+                    fallback_agent_id=agent_id,
+                )
+                detail = " Target has been auto-disabled."
             raise AppError(
                 f"Budget exceeded at {level} level ({budget.period.value}): "
                 f"current={current_spend}, limit={budget.limit_credits}, "
-                f"required={required_credits}",
+                f"required={required_credits}.{detail}",
                 status_code=402,
             )

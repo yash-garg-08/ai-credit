@@ -63,11 +63,16 @@ async def resolve_api_key(db: AsyncSession, plaintext_key: str) -> ApiKey | None
 
 
 async def revoke_api_key(
-    db: AsyncSession, api_key_id: uuid.UUID, reason: str | None = None
+    db: AsyncSession,
+    api_key_id: uuid.UUID,
+    reason: str | None = None,
+    agent_id: uuid.UUID | None = None,
 ) -> ApiKey:
     result = await db.execute(select(ApiKey).where(ApiKey.id == api_key_id))
     key = result.scalar_one_or_none()
     if key is None:
+        raise AppError("API key not found", status_code=404)
+    if agent_id is not None and key.agent_id != agent_id:
         raise AppError("API key not found", status_code=404)
     key.is_active = False
     key.revoked_reason = reason

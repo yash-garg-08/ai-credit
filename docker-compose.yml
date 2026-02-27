@@ -79,6 +79,7 @@ services:
       SECRET_KEY: super-secret-change-in-production-please
       CREDITS_PER_USD: "100"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:-}"
     ports:
       - "8000:8000"

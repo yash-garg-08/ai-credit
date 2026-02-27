@@ -3,8 +3,7 @@ Cost engine: tokens → cost_usd → credits
 
 All pricing comes from the database. No hardcoded prices.
 """
-import math
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,12 +37,14 @@ def calculate_cost(
     return input_cost + output_cost
 
 
-def cost_to_credits(cost_usd: Decimal) -> int:
+def cost_to_credits(cost_usd: Decimal, credits_per_usd: int | None = None) -> int:
     """
     Convert USD cost to credits (integer).
     Always rounds UP to avoid under-charging.
     """
-    return math.ceil(float(cost_usd) * settings.credits_per_usd)
+    rate = credits_per_usd if credits_per_usd is not None else settings.credits_per_usd
+    scaled = cost_usd * Decimal(rate)
+    return int(scaled.to_integral_value(rounding=ROUND_CEILING))
 
 
 async def compute_usage_cost(

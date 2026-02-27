@@ -1,9 +1,11 @@
 from cryptography.fernet import Fernet
+from pydantic import PrivateAttr
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     model_config = {"env_file": ".env", "extra": "ignore"}
+    _runtime_fernet_key: bytes | None = PrivateAttr(default=None)
 
     database_url: str = "postgresql+asyncpg://credit_platform:credit_platform_dev@localhost:5432/credit_platform"
     redis_url: str = "redis://localhost:6379/0"
@@ -16,6 +18,7 @@ class Settings(BaseSettings):
 
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
+    anthropic_api_key: str = ""
 
     # Fernet key for encrypting provider credentials at rest.
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -32,8 +35,10 @@ class Settings(BaseSettings):
         """Return a valid Fernet key, generating a default if not set (dev only)."""
         if self.credential_encryption_key:
             return self.credential_encryption_key.encode()
-        # Auto-generate for dev (not suitable for production — key changes on restart)
-        return Fernet.generate_key()
+        # Auto-generate once per process in dev (not suitable for production).
+        if self._runtime_fernet_key is None:
+            self._runtime_fernet_key = Fernet.generate_key()
+        return self._runtime_fernet_key
 
 
 settings = Settings()

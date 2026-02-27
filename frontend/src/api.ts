@@ -3,11 +3,16 @@ import type {
   AgentGroup,
   ApiKey,
   BalanceResponse,
+  Budget,
+  BudgetPeriod,
   BurnRate,
+  Credential,
+  CredentialMode,
   GatewayResponse,
   Group,
   LedgerEntry,
   Organization,
+  Policy,
   PricingRule,
   TopUser,
   UsageEvent,
@@ -140,6 +145,57 @@ export const apiKeysApi = {
     request<ApiKey>("POST", `/agents/${agentId}/keys`, { name }),
   revoke: (agentId: string, keyId: string) =>
     request<void>("DELETE", `/agents/${agentId}/keys/${keyId}`),
+};
+
+// --- Credentials (BYOK / managed provider keys) ---
+export const credentialsApi = {
+  create: (
+    orgId: string,
+    provider: string,
+    apiKey: string,
+    label?: string,
+    mode: CredentialMode = "BYOK"
+  ) =>
+    request<Credential>("POST", `/orgs/${orgId}/credentials`, {
+      provider,
+      api_key: apiKey,
+      label,
+      mode,
+    }),
+};
+
+type PolicyCreatePayload = {
+  name: string;
+  allowed_models?: string[] | null;
+  max_input_tokens?: number | null;
+  max_output_tokens?: number | null;
+  rpm_limit?: number | null;
+} & (
+  | { org_id: string; workspace_id?: never; agent_group_id?: never; agent_id?: never }
+  | { workspace_id: string; org_id?: never; agent_group_id?: never; agent_id?: never }
+  | { agent_group_id: string; org_id?: never; workspace_id?: never; agent_id?: never }
+  | { agent_id: string; org_id?: never; workspace_id?: never; agent_group_id?: never }
+);
+
+export const policiesApi = {
+  create: (payload: PolicyCreatePayload) =>
+    request<Policy>("POST", "/policies", payload),
+};
+
+type BudgetCreatePayload = {
+  period: BudgetPeriod;
+  limit_credits: number;
+  auto_disable?: boolean;
+} & (
+  | { org_id: string; workspace_id?: never; agent_group_id?: never; agent_id?: never }
+  | { workspace_id: string; org_id?: never; agent_group_id?: never; agent_id?: never }
+  | { agent_group_id: string; org_id?: never; workspace_id?: never; agent_id?: never }
+  | { agent_id: string; org_id?: never; workspace_id?: never; agent_group_id?: never }
+);
+
+export const budgetsApi = {
+  create: (payload: BudgetCreatePayload) =>
+    request<Budget>("POST", "/budgets", payload),
 };
 
 // --- Gateway (direct call with cpk_ key) ---

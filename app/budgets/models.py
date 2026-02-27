@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, Enum, ForeignKey, Uuid
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Enum, ForeignKey, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -19,6 +19,15 @@ class Budget(UUIDMixin, TimestampMixin, Base):
     If any level is exceeded, the request is blocked.
     """
     __tablename__ = "budgets"
+    __table_args__ = (
+        CheckConstraint(
+            "(CASE WHEN org_id IS NOT NULL THEN 1 ELSE 0 END + "
+            "CASE WHEN workspace_id IS NOT NULL THEN 1 ELSE 0 END + "
+            "CASE WHEN agent_group_id IS NOT NULL THEN 1 ELSE 0 END + "
+            "CASE WHEN agent_id IS NOT NULL THEN 1 ELSE 0 END) = 1",
+            name="ck_budgets_single_target",
+        ),
+    )
 
     # Exactly one of these FK columns is set
     org_id: Mapped[uuid.UUID | None] = mapped_column(

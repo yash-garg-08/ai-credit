@@ -85,6 +85,7 @@ cd frontend && npm install && npm run dev   # frontend on :3000
 ## Organizations
 
 An Organization is the top-level billing tenant. It owns the credit balance and all agents beneath it.
+Governance APIs are owner-scoped: only the org owner can create/list/mutate resources in that org hierarchy.
 
 ### Create an organization
 
@@ -412,7 +413,8 @@ curl -X POST http://localhost:8000/policies \
   }'
 ```
 
-You can attach a policy to exactly one level: `org_id`, `workspace_id`, `agent_group_id`, or `agent_id`.
+You must attach a policy to exactly one level: `org_id`, `workspace_id`, `agent_group_id`, or `agent_id`.
+If zero or multiple targets are provided, the API returns `422`.
 
 ---
 
@@ -454,9 +456,16 @@ curl -X POST http://localhost:8000/budgets \
   }'
 ```
 
-When `auto_disable = true` and a budget is exhausted, the agent's status changes to `BUDGET_EXHAUSTED` automatically and all subsequent gateway requests are rejected with `403`.
+Budgets must also target exactly one level (`org_id` / `workspace_id` / `agent_group_id` / `agent_id`).
+If zero or multiple targets are provided, the API returns `422`.
 
-When `auto_disable = false`, the request is simply blocked at that moment with `402` but the agent stays active.
+When `auto_disable = true` and a budget is exhausted, the exceeded target is automatically disabled:
+- `agent_id` → agent status becomes `BUDGET_EXHAUSTED`
+- `agent_group_id` → agent group becomes inactive
+- `workspace_id` → workspace becomes inactive
+- `org_id` → organization becomes inactive
+
+When `auto_disable = false`, the request is blocked at that moment with `402` and no target state is changed.
 
 ---
 
@@ -489,7 +498,7 @@ curl -X POST http://localhost:8000/orgs/<org_id>/credentials \
   }'
 ```
 
-Once a BYOK credential is active, the gateway automatically uses it for all requests from that org to that provider. If no BYOK credential exists, the platform falls back to the `OPENAI_API_KEY` environment variable.
+Once a BYOK credential is active, the gateway automatically uses it for all requests from that org to that provider. If no BYOK credential exists, the platform falls back to platform-managed keys (`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`).
 
 ### Encryption key setup
 
@@ -503,7 +512,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 CREDENTIAL_ENCRYPTION_KEY=<output from above>
 ```
 
-If `CREDENTIAL_ENCRYPTION_KEY` is not set, a temporary key is generated at startup (development only — credentials become unreadable after restart).
+If `CREDENTIAL_ENCRYPTION_KEY` is not set, a temporary key is generated once per process startup (development only — credentials become unreadable after restart).
 
 ---
 
@@ -618,6 +627,7 @@ make seed         # Re-seed pricing
 | `REDIS_URL` | No | Redis connection (default: `redis://localhost:6379/0`) |
 | `TEMPORAL_HOST` | No | Temporal server (default: `localhost:7233`) |
 | `OPENAI_API_KEY` | No | Platform-level OpenAI key (fallback if no BYOK) |
+| `ANTHROPIC_API_KEY` | No | Platform-level Anthropic key (fallback if no BYOK) |
 | `CREDENTIAL_ENCRYPTION_KEY` | Yes (prod) | Fernet key for BYOK encryption |
 | `CREDITS_PER_USD` | No | Conversion rate (default: `100`) |
 
@@ -629,4 +639,4 @@ make test
 pipenv run test
 ```
 
-18 tests run against an in-memory SQLite database. No running PostgreSQL or Temporal required.
+23 tests run against an in-memory SQLite database. No running PostgreSQL or Temporal required.

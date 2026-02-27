@@ -6,12 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.exceptions import AppError
 from app.credentials.models import CredentialMode, ProviderCredential
 
 
 def _fernet() -> Fernet:
-    return Fernet(settings.credential_encryption_key.encode())
+    return Fernet(settings.get_fernet_key())
 
 
 def encrypt_key(plaintext: str) -> str:

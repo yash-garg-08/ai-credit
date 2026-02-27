@@ -147,3 +147,45 @@ export interface GatewayResponse {
     request_id: string;
   };
 }
+
+export type CredentialMode = "MANAGED" | "BYOK";
+
+export interface Credential {
+  id: string;
+  org_id: string;
+  provider: string;
+  mode: CredentialMode;
+  label: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface Policy {
+  id: string;
+  name: string;
+  org_id: string | null;
+  workspace_id: string | null;
+  agent_group_id: string | null;
+  agent_id: string | null;
+  allowed_models: string[] | null;
+  max_input_tokens: number | null;
+  max_output_tokens: number | null;
+  rpm_limit: number | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export type BudgetPeriod = "DAILY" | "MONTHLY" | "TOTAL";
+
+export interface Budget {
+  id: string;
+  period: BudgetPeriod;
+  limit_credits: number;
+  auto_disable: boolean;
+  org_id: string | null;
+  workspace_id: string | null;
+  agent_group_id: string | null;
+  agent_id: string | null;
+  is_active: boolean;
+  created_at: string;
+}

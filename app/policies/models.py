@@ -1,6 +1,14 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Integer, JSON, String, Uuid
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDMixin
@@ -13,6 +21,15 @@ class Policy(UUIDMixin, TimestampMixin, Base):
     Most restrictive wins when cascading.
     """
     __tablename__ = "policies"
+    __table_args__ = (
+        CheckConstraint(
+            "(CASE WHEN org_id IS NOT NULL THEN 1 ELSE 0 END + "
+            "CASE WHEN workspace_id IS NOT NULL THEN 1 ELSE 0 END + "
+            "CASE WHEN agent_group_id IS NOT NULL THEN 1 ELSE 0 END + "
+            "CASE WHEN agent_id IS NOT NULL THEN 1 ELSE 0 END) = 1",
+            name="ck_policies_single_target",
+        ),
+    )
 
     # Exactly one of these FK columns is set (the level this policy applies to)
     org_id: Mapped[uuid.UUID | None] = mapped_column(

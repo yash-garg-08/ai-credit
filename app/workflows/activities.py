@@ -6,7 +6,7 @@ Activities interact with the database and external services.
 """
 import uuid
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 
 from temporalio import activity
 
@@ -81,8 +81,8 @@ async def calculate_cost(input: CalculateCostInput) -> CalculateCostOutput:
     output_cost = (Decimal(input.output_tokens) / 1000) * Decimal(input.output_cost_per_1k)
     cost_usd = input_cost + output_cost
 
-    import math
-    credits = math.ceil(float(cost_usd) * input.credits_per_usd)
+    scaled = cost_usd * Decimal(input.credits_per_usd)
+    credits = int(scaled.to_integral_value(rounding=ROUND_CEILING))
 
     return CalculateCostOutput(cost_usd=str(cost_usd), credits=credits)
 

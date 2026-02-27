@@ -5,6 +5,7 @@ Supports two modes:
   - Ephemeral providers (created per-request for BYOK org credentials)
 """
 from app.providers.base import BaseProvider
+from app.config import settings
 from app.providers.mock import MockProvider
 from app.providers.openai import OpenAIProvider
 
@@ -17,6 +18,13 @@ def get_provider(name: str) -> BaseProvider:
     if name not in _providers:
         if name == "openai":
             _providers[name] = OpenAIProvider()
+        elif name == "anthropic":
+            from app.providers.anthropic import AnthropicProvider
+            if not settings.anthropic_api_key:
+                raise ValueError(
+                    "ANTHROPIC_API_KEY is not set. Configure managed key or add BYOK credential."
+                )
+            _providers[name] = AnthropicProvider(api_key=settings.anthropic_api_key)
         elif name == "mock":
             _providers[name] = MockProvider()
         else:

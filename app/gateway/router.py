@@ -15,7 +15,6 @@ Processing:
   7. Atomic deduction + usage recording
   8. Return OpenAI-compatible response
 """
-import math
 import time
 import uuid
 from decimal import Decimal
@@ -150,7 +149,10 @@ async def chat_completions(
                 (Decimal("0") / 1000) * pricing_rule.input_cost_per_1k
                 + (Decimal(estimated_output) / 1000) * pricing_rule.output_cost_per_1k
             )
-            estimated_credits = math.ceil(float(estimated_cost_usd) * org.credits_per_usd)
+            estimated_credits = pricing_service.cost_to_credits(
+                estimated_cost_usd,
+                credits_per_usd=org.credits_per_usd,
+            )
 
             # 5. Budget check across hierarchy
             await check_budgets(
@@ -188,10 +190,16 @@ async def chat_completions(
         byok_key = await get_active_credential(db, org.id, provider_name)
 
     try:
-        if byok_key:
-            provider = make_provider(provider_name, byok_key)
-        else:
-            provider = get_provider(provider_name)
+        try:
+            if byok_key:
+                provider = make_provider(provider_name, byok_key)
+            else:
+                provider = get_provider(provider_name)
+        except ValueError as exc:
+            raise HTTPException(
+                503,
+                f"Provider '{provider_name}' is not configured: {exc}",
+            ) from exc
 
         provider_response = await provider.generate_completion(
             model=request.model,
@@ -239,7 +247,10 @@ async def chat_completions(
         (Decimal(actual_input) / 1000) * pricing_rule.input_cost_per_1k
         + (Decimal(actual_output) / 1000) * pricing_rule.output_cost_per_1k
     )
-    actual_credits = math.ceil(float(actual_cost_usd) * org.credits_per_usd)
+    actual_credits = pricing_service.cost_to_credits(
+        actual_cost_usd,
+        credits_per_usd=org.credits_per_usd,
+    )
 
     idempotency_key = f"gateway:{request_id}"
 

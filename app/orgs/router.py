@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.core.dependencies import CurrentUser, DbSession
+from app.core.tenancy import require_owned_org
 from app.ledger import service as ledger_service
 from app.orgs import service as org_service
 from app.orgs.schemas import OrgCreate, OrgResponse
@@ -25,9 +26,6 @@ async def list_orgs(user: CurrentUser, db: DbSession):
 @router.get("/{org_id}/balance")
 async def get_org_balance(org_id: str, user: CurrentUser, db: DbSession):
     import uuid
-    org = await org_service.get_org(db, uuid.UUID(org_id))
-    if org is None:
-        from fastapi import HTTPException
-        raise HTTPException(404, "Organization not found")
+    org = await require_owned_org(db, org_id=uuid.UUID(org_id), user_id=user.id)
     balance = await ledger_service.get_group_balance(db, org.billing_group_id)
     return {"org_id": str(org.id), "balance": balance}
