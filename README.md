@@ -340,7 +340,11 @@ curl -X POST http://localhost:8000/budgets \
 | POST | `/auth/register` | Create account |
 | POST | `/auth/login` | Get JWT token |
 | GET | `/groups/me` | List your legacy workspaces |
+| POST | `/groups` | Create a legacy workspace/group |
+| POST | `/groups/{id}/invite` | Invite user to a legacy group |
+| GET | `/groups/{id}/balance` | Get legacy group credit balance |
 | POST | `/credits/purchase` | Add credits to a billing group |
+| POST | `/usage/request` | Legacy direct usage request |
 
 ### Multi-Tenant Hierarchy
 | Method | Path | Description |
@@ -355,14 +359,18 @@ curl -X POST http://localhost:8000/budgets \
 | POST | `/agent-groups/{id}/agents` | Create agent |
 | GET | `/agent-groups/{id}/agents` | List agents |
 | POST | `/agents/{id}/keys` | Issue API key (returns plaintext once) |
+| GET | `/agents/{id}/keys` | List agent API keys |
 | DELETE | `/agents/{id}/keys/{key_id}` | Revoke API key |
 
 ### Governance
 | Method | Path | Description |
 |---|---|---|
 | POST | `/orgs/{id}/credentials` | Add BYOK provider credential |
+| GET | `/orgs/{id}/credentials` | List provider credentials |
 | POST | `/policies` | Create policy rule |
+| GET | `/policies` | List policies for one target (`org_id`/`workspace_id`/`agent_group_id`/`agent_id`) |
 | POST | `/budgets` | Create budget cap |
+| GET | `/budgets` | List budgets for one target (`org_id`/`workspace_id`/`agent_group_id`/`agent_id`) |
 
 ### AI Gateway
 | Method | Path | Description |

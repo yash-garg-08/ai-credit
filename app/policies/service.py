@@ -95,6 +95,31 @@ async def get_effective_policy(
     return _merge_policies(policies)
 
 
+async def list_policies_for_target(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    agent_group_id: uuid.UUID | None = None,
+    agent_id: uuid.UUID | None = None,
+) -> list[Policy]:
+    q = select(Policy)
+    if org_id is not None:
+        q = q.where(Policy.org_id == org_id)
+    elif workspace_id is not None:
+        q = q.where(Policy.workspace_id == workspace_id)
+    elif agent_group_id is not None:
+        q = q.where(Policy.agent_group_id == agent_group_id)
+    elif agent_id is not None:
+        q = q.where(Policy.agent_id == agent_id)
+    else:
+        return []
+
+    q = q.order_by(Policy.created_at.desc())
+    result = await db.execute(q)
+    return list(result.scalars().all())
+
+
 def enforce_policy(
     policy: EffectivePolicy,
     model: str,

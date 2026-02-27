@@ -5,6 +5,7 @@ import AgentsPage from "./pages/AgentsPage";
 import DashboardPage from "./pages/DashboardPage";
 import GroupsPage from "./pages/GroupsPage";
 import LoginPage from "./pages/LoginPage";
+import PricingPage from "./pages/PricingPage";
 import RegisterPage from "./pages/RegisterPage";
 import UsagePage from "./pages/UsagePage";
 
@@ -55,6 +56,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <AgentsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/pricing"
+        element={
+          <ProtectedRoute>
+            <PricingPage />
           </ProtectedRoute>
         }
       />

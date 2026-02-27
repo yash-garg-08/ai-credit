@@ -80,6 +80,15 @@ async def revoke_api_key(
     return key
 
 
+async def list_api_keys(db: AsyncSession, agent_id: uuid.UUID) -> list[ApiKey]:
+    result = await db.execute(
+        select(ApiKey)
+        .where(ApiKey.agent_id == agent_id)
+        .order_by(ApiKey.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
 async def get_agent(db: AsyncSession, agent_id: uuid.UUID) -> Agent | None:
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     return result.scalar_one_or_none()

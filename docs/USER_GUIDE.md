@@ -80,6 +80,14 @@ pipenv run worker       # Temporal worker (separate terminal)
 cd frontend && npm install && npm run dev   # frontend on :3000
 ```
 
+### UI Surface Map
+
+- `Dashboard` → group balance, burn-rate, top users, recent usage.
+- `Usage` → call legacy `/usage/request`, view usage history.
+- `Pricing` → backend pricing table from `/pricing`.
+- `Groups & Credits` → legacy groups, invites, credit purchases.
+- `Agent Governance` → org/workspace/group/agent hierarchy, org billing top-up, API key issue/list/revoke, provider credential list/create, policy list/create, budget list/create, gateway test.
+
 ---
 
 ## Organizations
@@ -197,6 +205,13 @@ Response:
 ```
 
 > **Important:** The `plaintext_key` is shown **exactly once** at creation. Copy it immediately. It is never stored — only a SHA-256 hash is persisted. If you lose it, revoke and reissue.
+
+### List API keys for an agent
+
+```bash
+curl http://localhost:8000/agents/<agent_id>/keys \
+  -H "Authorization: Bearer <your-jwt>"
+```
 
 ### Revoke an API key
 
@@ -414,7 +429,16 @@ curl -X POST http://localhost:8000/policies \
 ```
 
 You must attach a policy to exactly one level: `org_id`, `workspace_id`, `agent_group_id`, or `agent_id`.
-If zero or multiple targets are provided, the API returns `422`.
+For `POST /policies`, if zero or multiple targets are provided in the payload, the API returns `422`.
+
+### List policies for one target
+
+```bash
+curl "http://localhost:8000/policies?org_id=<org_id>" \
+  -H "Authorization: Bearer <your-jwt>"
+```
+
+For `GET /policies`, provide exactly one target query parameter (`org_id`, `workspace_id`, `agent_group_id`, or `agent_id`) or the API returns `400`.
 
 ---
 
@@ -457,7 +481,16 @@ curl -X POST http://localhost:8000/budgets \
 ```
 
 Budgets must also target exactly one level (`org_id` / `workspace_id` / `agent_group_id` / `agent_id`).
-If zero or multiple targets are provided, the API returns `422`.
+For `POST /budgets`, if zero or multiple targets are provided in the payload, the API returns `422`.
+
+### List budgets for one target
+
+```bash
+curl "http://localhost:8000/budgets?workspace_id=<workspace_id>" \
+  -H "Authorization: Bearer <your-jwt>"
+```
+
+For `GET /budgets`, provide exactly one target query parameter (`org_id`, `workspace_id`, `agent_group_id`, or `agent_id`) or the API returns `400`.
 
 When `auto_disable = true` and a budget is exhausted, the exceeded target is automatically disabled:
 - `agent_id` → agent status becomes `BUDGET_EXHAUSTED`
@@ -499,6 +532,13 @@ curl -X POST http://localhost:8000/orgs/<org_id>/credentials \
 ```
 
 Once a BYOK credential is active, the gateway automatically uses it for all requests from that org to that provider. If no BYOK credential exists, the platform falls back to platform-managed keys (`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`).
+
+### List credentials for an org
+
+```bash
+curl http://localhost:8000/orgs/<org_id>/credentials \
+  -H "Authorization: Bearer <your-jwt>"
+```
 
 ### Encryption key setup
 

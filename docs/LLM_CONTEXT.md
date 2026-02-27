@@ -186,9 +186,10 @@ app/
                          create_api_key(db, agent_id, name) → (ApiKey, plaintext_key)
                          resolve_api_key(db, plaintext_key) → ApiKey | None  [hash lookup]
                          revoke_api_key(db, api_key_id, reason, agent_id?)
+                         list_api_keys(db, agent_id)
                          create_agent, list_agents_for_group, get_agent, disable_agent
     router.py            POST /agent-groups/{id}/agents, GET /agent-groups/{id}/agents
-                         POST /agents/{id}/keys, DELETE /agents/{id}/keys/{key_id}
+                         POST /agents/{id}/keys, GET /agents/{id}/keys, DELETE /agents/{id}/keys/{key_id}
                          owner-scope enforced via agent_group/agent hierarchy
 
   credentials/
@@ -198,8 +199,9 @@ app/
     service.py           encrypt_key(plaintext) → ciphertext  [Fernet]
                          decrypt_key(ciphertext) → plaintext
                          add_credential(db, org_id, provider, plaintext_api_key, label, mode)
+                         list_credentials(db, org_id)
                          get_active_credential(db, org_id, provider) → str | None  [decrypted]
-    router.py            POST /orgs/{org_id}/credentials (owner only)
+    router.py            POST /orgs/{org_id}/credentials, GET /orgs/{org_id}/credentials (owner only)
 
   policies/
     models.py            Policy: id, org_id|workspace_id|agent_group_id|agent_id (exactly one set, DB check constraint),
@@ -211,9 +213,11 @@ app/
                            ↳ max_tokens, rpm: MINIMUM of non-None values
                          get_effective_policy(db, org_id, workspace_id, agent_group_id, agent_id)
                            ↳ single query fetching all policies matching any of the 4 levels
+                         list_policies_for_target(db, target=one level)
                          enforce_policy(policy, model, requested_max_tokens) → effective_max_tokens
                            ↳ raises AppError(message, status_code=403) if model not in allowed_models
     router.py            POST /policies (owner + single-target schema enforcement)
+                         GET /policies?org_id|workspace_id|agent_group_id|agent_id (exactly one target query required)
 
   budgets/
     models.py            Budget: id, org_id|workspace_id|agent_group_id|agent_id (exactly one set, DB check constraint),
@@ -227,7 +231,9 @@ app/
                            ↳ for each budget: compute current spend, check current+required <= limit
                            ↳ if exceeded and auto_disable=True: disables target (org/workspace/group/agent)
                            ↳ raises AppError(message, status_code=402) on any exceeded budget
+                         list_budgets_for_target(db, target=one level)
     router.py            POST /budgets (owner + single-target schema enforcement)
+                         GET /budgets?org_id|workspace_id|agent_group_id|agent_id (exactly one target query required)
 
   audit/
     models.py            AuditLog: id, org_id(Uuid not FK), actor_user_id(FK nullable),
@@ -321,7 +327,7 @@ ALTER TABLE usage_events ADD error_message VARCHAR(1024) nullable;
 
 ---
 
-## API ROUTES (all 32)
+## API ROUTES (all 36)
 
 ```
 POST   /auth/register
@@ -342,14 +348,18 @@ GET    /orgs/{org_id}/balance
 POST   /orgs/{org_id}/workspaces
 GET    /orgs/{org_id}/workspaces
 POST   /orgs/{org_id}/credentials
+GET    /orgs/{org_id}/credentials
 POST   /workspaces/{workspace_id}/agent-groups
 GET    /workspaces/{workspace_id}/agent-groups
 POST   /agent-groups/{agent_group_id}/agents
 GET    /agent-groups/{agent_group_id}/agents
 POST   /agents/{agent_id}/keys
+GET    /agents/{agent_id}/keys
 DELETE /agents/{agent_id}/keys/{key_id}
 POST   /policies
+GET    /policies
 POST   /budgets
+GET    /budgets
 POST   /gateway/v1/chat/completions
 GET    /health
 GET    /docs  (Swagger UI)
@@ -507,12 +517,15 @@ CREDITS_PER_USD=100
 /register       RegisterPage.tsx      User registration
 /              DashboardPage.tsx      Balance card, burn rate, top users, recent activity
 /usage         UsagePage.tsx          Legacy /usage/request form + history table
+/pricing       PricingPage.tsx        Read-only pricing table from backend `/pricing`
 /groups        GroupsPage.tsx         Create group, purchase credits, invite member
 /agents        AgentsPage.tsx         Full Org→Workspace→AgentGroup→Agent hierarchy
                                       API key issuance with reveal-once display
-                                      Credential (BYOK/managed) creation UI
-                                      Policy creation UI (single target + limits)
-                                      Budget creation UI (single target + auto_disable)
+                                      API key list/revoke (persistent backend list + manual IDs)
+                                      Org billing top-up via `/credits/purchase`
+                                      Credential list/create UI
+                                      Policy list/create UI (single target + limits)
+                                      Budget list/create UI (single target + auto_disable)
                                       Inline gateway test panel (fires real gateway calls)
 ```
 

@@ -141,6 +141,8 @@ export const agentsApi = {
 
 // --- API Keys ---
 export const apiKeysApi = {
+  list: (agentId: string) =>
+    request<ApiKey[]>("GET", `/agents/${agentId}/keys`),
   create: (agentId: string, name: string) =>
     request<ApiKey>("POST", `/agents/${agentId}/keys`, { name }),
   revoke: (agentId: string, keyId: string) =>
@@ -149,6 +151,8 @@ export const apiKeysApi = {
 
 // --- Credentials (BYOK / managed provider keys) ---
 export const credentialsApi = {
+  list: (orgId: string) =>
+    request<Credential[]>("GET", `/orgs/${orgId}/credentials`),
   create: (
     orgId: string,
     provider: string,
@@ -170,14 +174,26 @@ type PolicyCreatePayload = {
   max_input_tokens?: number | null;
   max_output_tokens?: number | null;
   rpm_limit?: number | null;
-} & (
-  | { org_id: string; workspace_id?: never; agent_group_id?: never; agent_id?: never }
-  | { workspace_id: string; org_id?: never; agent_group_id?: never; agent_id?: never }
-  | { agent_group_id: string; org_id?: never; workspace_id?: never; agent_id?: never }
-  | { agent_id: string; org_id?: never; workspace_id?: never; agent_group_id?: never }
-);
+  org_id?: string;
+  workspace_id?: string;
+  agent_group_id?: string;
+  agent_id?: string;
+};
 
 export const policiesApi = {
+  list: (params: {
+    org_id?: string;
+    workspace_id?: string;
+    agent_group_id?: string;
+    agent_id?: string;
+  }) => {
+    const query = new URLSearchParams(
+      Object.entries(params).filter(([, value]) => Boolean(value)) as Array<
+        [string, string]
+      >
+    );
+    return request<Policy[]>("GET", `/policies?${query.toString()}`);
+  },
   create: (payload: PolicyCreatePayload) =>
     request<Policy>("POST", "/policies", payload),
 };
@@ -186,14 +202,26 @@ type BudgetCreatePayload = {
   period: BudgetPeriod;
   limit_credits: number;
   auto_disable?: boolean;
-} & (
-  | { org_id: string; workspace_id?: never; agent_group_id?: never; agent_id?: never }
-  | { workspace_id: string; org_id?: never; agent_group_id?: never; agent_id?: never }
-  | { agent_group_id: string; org_id?: never; workspace_id?: never; agent_id?: never }
-  | { agent_id: string; org_id?: never; workspace_id?: never; agent_group_id?: never }
-);
+  org_id?: string;
+  workspace_id?: string;
+  agent_group_id?: string;
+  agent_id?: string;
+};
 
 export const budgetsApi = {
+  list: (params: {
+    org_id?: string;
+    workspace_id?: string;
+    agent_group_id?: string;
+    agent_id?: string;
+  }) => {
+    const query = new URLSearchParams(
+      Object.entries(params).filter(([, value]) => Boolean(value)) as Array<
+        [string, string]
+      >
+    );
+    return request<Budget[]>("GET", `/budgets?${query.toString()}`);
+  },
   create: (payload: BudgetCreatePayload) =>
     request<Budget>("POST", "/budgets", payload),
 };

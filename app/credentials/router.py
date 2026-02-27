@@ -23,3 +23,9 @@ async def add_credential(org_id: uuid.UUID, body: CredentialCreate, user: Curren
             mode=body.mode,
         )
     return cred
+
+
+@router.get("", response_model=list[CredentialResponse])
+async def list_credentials(org_id: uuid.UUID, user: CurrentUser, db: DbSession):
+    await require_owned_org(db, org_id=org_id, user_id=user.id)
+    return await cred_service.list_credentials(db, org_id=org_id)

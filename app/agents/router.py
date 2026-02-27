@@ -47,6 +47,12 @@ async def create_api_key(agent_id: uuid.UUID, body: ApiKeyCreate, user: CurrentU
     )
 
 
+@key_router.get("", response_model=list[ApiKeyResponse])
+async def list_api_keys(agent_id: uuid.UUID, user: CurrentUser, db: DbSession):
+    await require_owned_agent(db, agent_id=agent_id, user_id=user.id)
+    return await agent_service.list_api_keys(db, agent_id=agent_id)
+
+
 @key_router.delete("/{key_id}", status_code=204)
 async def revoke_api_key(agent_id: uuid.UUID, key_id: uuid.UUID, user: CurrentUser, db: DbSession):
     await require_owned_agent(db, agent_id=agent_id, user_id=user.id)

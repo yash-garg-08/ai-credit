@@ -58,3 +58,14 @@ async def get_active_credential(
     if cred is None:
         return None
     return decrypt_key(cred.encrypted_api_key)
+
+
+async def list_credentials(
+    db: AsyncSession, org_id: uuid.UUID
+) -> list[ProviderCredential]:
+    result = await db.execute(
+        select(ProviderCredential)
+        .where(ProviderCredential.org_id == org_id)
+        .order_by(ProviderCredential.created_at.desc())
+    )
+    return list(result.scalars().all())

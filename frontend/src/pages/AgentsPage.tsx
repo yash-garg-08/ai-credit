@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   agentGroupsApi,
   agentsApi,
   apiKeysApi,
   budgetsApi,
   credentialsApi,
+  creditsApi,
   gatewayApi,
   orgsApi,
   policiesApi,
@@ -14,14 +15,23 @@ import type {
   Agent,
   AgentGroup,
   ApiKey,
+  Budget,
   BudgetPeriod,
+  Credential,
   CredentialMode,
   GatewayResponse,
   Organization,
+  Policy,
   Workspace,
 } from "../types";
 
 type TargetLevel = "org" | "workspace" | "agent_group" | "agent";
+type TargetParams = {
+  org_id?: string;
+  workspace_id?: string;
+  agent_group_id?: string;
+  agent_id?: string;
+};
 
 function resolveTarget(
   level: TargetLevel,
@@ -29,7 +39,7 @@ function resolveTarget(
   selectedWs: Workspace | null,
   selectedGroup: AgentGroup | null,
   selectedAgent: Agent | null
-): Record<string, string> | null {
+): TargetParams | null {
   if (level === "org" && selectedOrg) return { org_id: selectedOrg.id };
   if (level === "workspace" && selectedWs) return { workspace_id: selectedWs.id };
   if (level === "agent_group" && selectedGroup) return { agent_group_id: selectedGroup.id };
@@ -52,6 +62,12 @@ export default function AgentsPage() {
   const [selectedGroup, setSelectedGroup] = useState<AgentGroup | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+  const [credentials, setCredentials] = useState<Credential[]>([]);
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
+
   const [newKey, setNewKey] = useState<ApiKey | null>(null);
   const [orgBalance, setOrgBalance] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +79,13 @@ export default function AgentsPage() {
   const [groupName, setGroupName] = useState("");
   const [agentName, setAgentName] = useState("");
   const [keyName, setKeyName] = useState("default");
+
+  // Billing form
+  const [topupAmount, setTopupAmount] = useState("1000");
+
+  // Key revoke form
+  const [manualRevokeAgentId, setManualRevokeAgentId] = useState("");
+  const [manualRevokeKeyId, setManualRevokeKeyId] = useState("");
 
   // Credential form
   const [credentialProvider, setCredentialProvider] = useState("openai");
@@ -93,6 +116,15 @@ export default function AgentsPage() {
     [selectedOrg, selectedWs, selectedGroup, selectedAgent]
   );
 
+  const refreshOrgBalance = async (orgId: string) => {
+    try {
+      const res = await orgsApi.balance(orgId);
+      setOrgBalance(res.balance);
+    } catch {
+      setOrgBalance(null);
+    }
+  };
+
   const loadOrgs = async () => {
     try {
       const data = await orgsApi.list();
@@ -104,9 +136,31 @@ export default function AgentsPage() {
   };
 
   const loadAgents = async (agentGroupId: string) => {
-    const data = await agentsApi.list(agentGroupId);
-    setAgents(data);
-    setSelectedAgent(data[0] ?? null);
+    try {
+      const data = await agentsApi.list(agentGroupId);
+      setAgents(data);
+      setSelectedAgent(data[0] ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load agents");
+    }
+  };
+
+  const loadApiKeys = async (agentId: string) => {
+    try {
+      const data = await apiKeysApi.list(agentId);
+      setApiKeys(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load API keys");
+    }
+  };
+
+  const loadCredentials = async (orgId: string) => {
+    try {
+      const data = await credentialsApi.list(orgId);
+      setCredentials(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load credentials");
+    }
   };
 
   useEffect(() => {
@@ -115,25 +169,84 @@ export default function AgentsPage() {
 
   useEffect(() => {
     if (!selectedOrg) return;
-    orgsApi.balance(selectedOrg.id).then((res) => setOrgBalance(res.balance)).catch(() => {});
-    workspacesApi.list(selectedOrg.id).then((data) => {
-      setWorkspaces(data);
-      setSelectedWs(data[0] ?? null);
-    });
+    refreshOrgBalance(selectedOrg.id);
+    loadCredentials(selectedOrg.id);
+    workspacesApi
+      .list(selectedOrg.id)
+      .then((data) => {
+        setWorkspaces(data);
+        setSelectedWs(data[0] ?? null);
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : "Failed to load workspaces");
+      });
   }, [selectedOrg]);
 
   useEffect(() => {
     if (!selectedWs) return;
-    agentGroupsApi.list(selectedWs.id).then((data) => {
-      setAgentGroups(data);
-      setSelectedGroup(data[0] ?? null);
-    });
+    agentGroupsApi
+      .list(selectedWs.id)
+      .then((data) => {
+        setAgentGroups(data);
+        setSelectedGroup(data[0] ?? null);
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message : "Failed to load agent groups");
+      });
   }, [selectedWs]);
 
   useEffect(() => {
     if (!selectedGroup) return;
     loadAgents(selectedGroup.id);
   }, [selectedGroup]);
+
+  useEffect(() => {
+    if (!selectedAgent) {
+      setApiKeys([]);
+      return;
+    }
+    loadApiKeys(selectedAgent.id);
+  }, [selectedAgent]);
+
+  useEffect(() => {
+    const params = resolveTarget(
+      policyTarget,
+      selectedOrg,
+      selectedWs,
+      selectedGroup,
+      selectedAgent
+    );
+    if (!params) {
+      setPolicies([]);
+      return;
+    }
+    policiesApi
+      .list(params)
+      .then(setPolicies)
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : "Failed to load policies")
+      );
+  }, [policyTarget, selectedOrg, selectedWs, selectedGroup, selectedAgent]);
+
+  useEffect(() => {
+    const params = resolveTarget(
+      budgetTarget,
+      selectedOrg,
+      selectedWs,
+      selectedGroup,
+      selectedAgent
+    );
+    if (!params) {
+      setBudgets([]);
+      return;
+    }
+    budgetsApi
+      .list(params)
+      .then(setBudgets)
+      .catch((e) =>
+        setError(e instanceof Error ? e.message : "Failed to load budgets")
+      );
+  }, [budgetTarget, selectedOrg, selectedWs, selectedGroup, selectedAgent]);
 
   const createOrg = async () => {
     if (!orgName.trim()) return;
@@ -176,10 +289,10 @@ export default function AgentsPage() {
   const createAgent = async () => {
     if (!agentName.trim() || !selectedGroup) return;
     try {
-      const a = await agentsApi.create(selectedGroup.id, agentName.trim());
+      const agent = await agentsApi.create(selectedGroup.id, agentName.trim());
       setAgentName("");
-      setAgents((prev) => [...prev, a]);
-      setSelectedAgent(a);
+      setAgents((prev) => [...prev, agent]);
+      setSelectedAgent(agent);
       setNotice("Agent created");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create agent");
@@ -190,9 +303,50 @@ export default function AgentsPage() {
     try {
       const key = await apiKeysApi.create(agentId, keyName || "default");
       setNewKey(key);
+      if (selectedAgent?.id === agentId) {
+        await loadApiKeys(agentId);
+      }
       setNotice("API key issued. Copy it now.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to issue API key");
+    }
+  };
+
+  const revokeKey = async (agentId: string, keyId: string) => {
+    try {
+      await apiKeysApi.revoke(agentId, keyId);
+      if (selectedAgent?.id === agentId) {
+        await loadApiKeys(agentId);
+      }
+      setNotice("API key revoked");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to revoke API key");
+    }
+  };
+
+  const revokeManualKey = async () => {
+    if (!manualRevokeAgentId.trim() || !manualRevokeKeyId.trim()) {
+      setError("Agent ID and Key ID are required.");
+      return;
+    }
+    await revokeKey(manualRevokeAgentId.trim(), manualRevokeKeyId.trim());
+    setManualRevokeAgentId("");
+    setManualRevokeKeyId("");
+  };
+
+  const purchaseOrgCredits = async () => {
+    if (!selectedOrg) return;
+    const amount = parseIntOrNull(topupAmount);
+    if (amount === null || amount <= 0) {
+      setError("Top-up amount must be a positive integer.");
+      return;
+    }
+    try {
+      await creditsApi.purchase(selectedOrg.billing_group_id, amount);
+      await refreshOrgBalance(selectedOrg.id);
+      setNotice(`Added ${amount.toLocaleString()} credits to org billing group`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to purchase credits");
     }
   };
 
@@ -208,6 +362,7 @@ export default function AgentsPage() {
       );
       setCredentialKey("");
       setCredentialLabel("");
+      await loadCredentials(selectedOrg.id);
       setNotice("Credential saved");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save credential");
@@ -239,7 +394,9 @@ export default function AgentsPage() {
         allowed_models: allowedModels.length > 0 ? allowedModels : null,
         max_output_tokens: parseIntOrNull(policyMaxOutput),
         rpm_limit: parseIntOrNull(policyRpm),
-      } as any);
+      });
+      const refreshed = await policiesApi.list(target);
+      setPolicies(refreshed);
       setNotice("Policy created");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create policy");
@@ -271,7 +428,9 @@ export default function AgentsPage() {
         period: budgetPeriod,
         limit_credits: limit,
         auto_disable: budgetAutoDisable,
-      } as any);
+      });
+      const refreshed = await budgetsApi.list(target);
+      setBudgets(refreshed);
       setNotice("Budget created");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create budget");
@@ -293,18 +452,35 @@ export default function AgentsPage() {
 
   return (
     <div className="p-8 max-w-6xl mx-auto space-y-8">
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between gap-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Agent Governance</h1>
           <p className="text-gray-500 text-sm mt-1">
-            Manage hierarchy, credentials, policies, budgets, and run gateway tests
+            Full backend controls: hierarchy, keys, billing, credentials, policies, budgets, gateway.
           </p>
         </div>
-        <div className="text-sm text-gray-500">
-          Org balance:{" "}
-          <span className="font-semibold text-gray-800">
-            {orgBalance !== null ? `${orgBalance.toLocaleString()} credits` : "—"}
-          </span>
+        <div className="text-sm text-gray-500 min-w-60">
+          <div>
+            Org balance:{" "}
+            <span className="font-semibold text-gray-800">
+              {orgBalance !== null ? `${orgBalance.toLocaleString()} credits` : "—"}
+            </span>
+          </div>
+          <div className="mt-2 flex gap-2">
+            <input
+              value={topupAmount}
+              onChange={(e) => setTopupAmount(e.target.value)}
+              placeholder="Top-up credits"
+              className="w-36 text-sm border border-gray-300 rounded px-2 py-1"
+            />
+            <button
+              onClick={purchaseOrgCredits}
+              disabled={!selectedOrg}
+              className="px-3 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50"
+            >
+              Top Up
+            </button>
+          </div>
         </div>
       </div>
 
@@ -327,9 +503,7 @@ export default function AgentsPage() {
 
       {newKey?.plaintext_key && (
         <div className="bg-amber-50 border border-amber-300 rounded-lg p-4">
-          <p className="text-amber-800 font-semibold text-sm mb-2">
-            New API key (shown once)
-          </p>
+          <p className="text-amber-800 font-semibold text-sm mb-2">New API key (shown once)</p>
           <code className="block bg-white border border-amber-200 rounded p-3 text-sm font-mono break-all select-all">
             {newKey.plaintext_key}
           </code>
@@ -513,6 +687,59 @@ export default function AgentsPage() {
             </div>
           </Panel>
 
+          <Panel title="API Keys">
+            {selectedAgent ? (
+              apiKeys.length === 0 ? (
+                <p className="text-sm text-gray-500">No keys for selected agent.</p>
+              ) : (
+                <div className="space-y-2 mb-4">
+                  {apiKeys.map((key) => (
+                    <div
+                      key={key.id}
+                      className="flex items-center justify-between border border-gray-100 rounded p-2"
+                    >
+                      <div className="text-xs text-gray-700">
+                        <div className="font-semibold">
+                          {key.name} · ...{key.key_suffix}
+                        </div>
+                        <div className="text-gray-500 font-mono">{key.id}</div>
+                      </div>
+                      <button
+                        onClick={() => revokeKey(key.agent_id, key.id)}
+                        disabled={!key.is_active}
+                        className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-40"
+                      >
+                        {key.is_active ? "Revoke" : "Revoked"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : (
+              <p className="text-sm text-gray-500 mb-3">Select an agent to view keys.</p>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <input
+                value={manualRevokeAgentId}
+                onChange={(e) => setManualRevokeAgentId(e.target.value)}
+                placeholder="Agent ID"
+                className="text-sm border border-gray-300 rounded px-3 py-2"
+              />
+              <input
+                value={manualRevokeKeyId}
+                onChange={(e) => setManualRevokeKeyId(e.target.value)}
+                placeholder="Key ID"
+                className="text-sm border border-gray-300 rounded px-3 py-2"
+              />
+            </div>
+            <button
+              onClick={revokeManualKey}
+              className="mt-2 w-full py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700"
+            >
+              Revoke by IDs
+            </button>
+          </Panel>
+
           <Panel title="Provider Credentials">
             <div className="grid grid-cols-2 gap-2">
               <input
@@ -549,10 +776,18 @@ export default function AgentsPage() {
             >
               Save Credential
             </button>
+            <div className="mt-3 text-xs text-gray-600 space-y-1 max-h-24 overflow-y-auto">
+              {credentials.map((c) => (
+                <div key={c.id}>
+                  {c.provider} · {c.mode} · {c.label ?? "no-label"}
+                </div>
+              ))}
+              {credentials.length === 0 && <div>No credentials yet.</div>}
+            </div>
           </Panel>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <Panel title="Create Policy">
+            <Panel title="Policies">
               <select
                 value={policyTarget}
                 onChange={(e) => setPolicyTarget(e.target.value as TargetLevel)}
@@ -601,9 +836,18 @@ export default function AgentsPage() {
               >
                 Create Policy
               </button>
+              <div className="mt-3 text-xs text-gray-600 space-y-1 max-h-20 overflow-y-auto">
+                {policies.map((p) => (
+                  <div key={p.id}>
+                    {p.name}
+                    {p.allowed_models ? ` · ${p.allowed_models.join(",")}` : ""}
+                  </div>
+                ))}
+                {policies.length === 0 && <div>No policies for target.</div>}
+              </div>
             </Panel>
 
-            <Panel title="Create Budget">
+            <Panel title="Budgets">
               <select
                 value={budgetTarget}
                 onChange={(e) => setBudgetTarget(e.target.value as TargetLevel)}
@@ -651,6 +895,14 @@ export default function AgentsPage() {
               >
                 Create Budget
               </button>
+              <div className="mt-3 text-xs text-gray-600 space-y-1 max-h-20 overflow-y-auto">
+                {budgets.map((b) => (
+                  <div key={b.id}>
+                    {b.period} · {b.limit_credits} · {b.auto_disable ? "auto-disable" : "block"}
+                  </div>
+                ))}
+                {budgets.length === 0 && <div>No budgets for target.</div>}
+              </div>
             </Panel>
           </div>
         </section>
@@ -661,7 +913,7 @@ export default function AgentsPage() {
   );
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
       <h2 className="text-base font-semibold text-gray-800 mb-3">{title}</h2>

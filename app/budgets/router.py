@@ -1,5 +1,8 @@
+import uuid
+
 from fastapi import APIRouter
 
+from app.budgets import service as budget_service
 from app.budgets.models import Budget
 from app.budgets.schemas import BudgetCreate, BudgetResponse
 from app.core.dependencies import CurrentUser, DbSession
@@ -42,3 +45,45 @@ async def create_budget(body: BudgetCreate, user: CurrentUser, db: DbSession):
         db.add(budget)
         await db.flush()
     return budget
+
+
+@router.get("", response_model=list[BudgetResponse])
+async def list_budgets(
+    user: CurrentUser,
+    db: DbSession,
+    org_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    agent_group_id: uuid.UUID | None = None,
+    agent_id: uuid.UUID | None = None,
+):
+    target_count = sum(
+        1
+        for value in (org_id, workspace_id, agent_group_id, agent_id)
+        if value is not None
+    )
+    if target_count != 1:
+        raise AppError(
+            "Provide exactly one target query parameter: org_id, workspace_id, "
+            "agent_group_id, or agent_id",
+            status_code=400,
+        )
+
+    if org_id is not None:
+        await require_owned_org(db, org_id=org_id, user_id=user.id)
+    elif workspace_id is not None:
+        await require_owned_workspace(db, workspace_id=workspace_id, user_id=user.id)
+    elif agent_group_id is not None:
+        await require_owned_agent_group(
+            db, agent_group_id=agent_group_id, user_id=user.id
+        )
+    elif agent_id is not None:
+        await require_owned_agent(db, agent_id=agent_id, user_id=user.id)
+
+    budgets = await budget_service.list_budgets_for_target(
+        db,
+        org_id=org_id,
+        workspace_id=workspace_id,
+        agent_group_id=agent_group_id,
+        agent_id=agent_id,
+    )
+    return [BudgetResponse.model_validate(b) for b in budgets]

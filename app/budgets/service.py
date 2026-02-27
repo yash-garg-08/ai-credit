@@ -171,3 +171,28 @@ async def check_budgets(
                 f"required={required_credits}.{detail}",
                 status_code=402,
             )
+
+
+async def list_budgets_for_target(
+    db: AsyncSession,
+    *,
+    org_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    agent_group_id: uuid.UUID | None = None,
+    agent_id: uuid.UUID | None = None,
+) -> list[Budget]:
+    q = select(Budget)
+    if org_id is not None:
+        q = q.where(Budget.org_id == org_id)
+    elif workspace_id is not None:
+        q = q.where(Budget.workspace_id == workspace_id)
+    elif agent_group_id is not None:
+        q = q.where(Budget.agent_group_id == agent_group_id)
+    elif agent_id is not None:
+        q = q.where(Budget.agent_id == agent_id)
+    else:
+        return []
+
+    q = q.order_by(Budget.created_at.desc())
+    result = await db.execute(q)
+    return list(result.scalars().all())
